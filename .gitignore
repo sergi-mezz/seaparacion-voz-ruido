@@ -1,0 +1,8 @@
+data/raw/
+data/processed/
+data/splits/
+*.wav
+__pycache__/
+*.pyc
+.venv/
+.DS_Store
