@@ -10,6 +10,12 @@ def stft(y: np.ndarray) -> np.ndarray:
 def istft(S: np.ndarray, length: int | None = None) -> np.ndarray:
     return librosa.istft(S, length=length)
 
+def magnitude_phase(S: np.ndarray):
+    return np.abs(S), np.angle(S)
+
+def to_complex(magnitude: np.ndarray, phase: np.ndarray) -> np.ndarray:
+    return magnitude * np.exp(1j * phase)
+
 def reconstruction_error(y: np.ndarray) -> float:
     y_rec = istft(stft(y), length=len(y))
     return float(np.sqrt(np.mean((y - y_rec) ** 2)))
@@ -18,6 +24,10 @@ def load_audio(path: str | Path, sr: int = SAMPLE_RATE) -> np.ndarray:
     import librosa
     y, _ = librosa.load(str(path), sr=sr, mono=True)
     return y.astype(np.float32)
+
+def match_length(a: np.ndarray, b: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    n = min(len(a), len(b))
+    return a[:n], b[:n]
 
 if __name__ == "__main__":
     import sys

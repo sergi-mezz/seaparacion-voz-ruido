@@ -1,7 +1,7 @@
 from __future__ import annotations
 import numpy as np
 
-from preprocessing import stft, istft
+from preprocessing import stft, istft, magnitude_phase, to_complex
 
 def spectral_subtraction(noisy: np.ndarray, over_subtraction: float = 1.5,
                          spectral_floor: float = 0.05) -> np.ndarray:
@@ -14,6 +14,32 @@ def spectral_subtraction(noisy: np.ndarray, over_subtraction: float = 1.5,
     clean_mag = np.maximum(clean_mag, floor)
 
     S_clean = to_complex(clean_mag, phase)
+    return istft(S_clean, length=len(noisy)).astype(np.float32)
+
+def _smooth2d(m: np.ndarray, k: int = 3) -> np.ndarray:
+    ker = np.ones(k) / k
+    m = np.apply_along_axis(lambda r: np.convolve(r, ker, mode="same"), 1, m)
+    m = np.apply_along_axis(lambda r: np.convolve(r, ker, mode="same"), 0, m)
+    return m
+
+def spectral_gating(noisy: np.ndarray, n_std: float = 1.5,
+                    gain_floor: float = 0.05, smooth: bool = True) -> np.ndarray:
+    S = stft(noisy)
+    mag, phase = magnitude_phase(S)
+
+    p20 = np.quantile(mag, 0.20, axis=1, keepdims=True)
+    quiet = np.where(mag <= p20, mag, np.nan)
+    noise_mean = np.nanmean(quiet, axis=1, keepdims=True)
+    noise_std = np.nanstd(quiet, axis=1, keepdims=True)
+    threshold = noise_mean + n_std * noise_std
+
+    mask = (mag >= threshold).astype(np.float32)
+    mask = mask + (1.0 - mask) * gain_floor
+    if smooth:
+        mask = _smooth2d(mask, k=3).astype(np.float32)
+        mask = np.clip(mask, gain_floor, 1.0)
+
+    S_clean = to_complex(mag * mask, phase)
     return istft(S_clean, length=len(noisy)).astype(np.float32)
 
 def estimate_noise_magnitude(mag: np.ndarray, quantile: float = 0.10) -> np.ndarray:
