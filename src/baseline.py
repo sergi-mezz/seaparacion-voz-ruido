@@ -5,6 +5,7 @@ from preprocessing import stft, istft, magnitude_phase, to_complex
 
 def spectral_subtraction(noisy: np.ndarray, over_subtraction: float = 1.5,
                          spectral_floor: float = 0.05) -> np.ndarray:
+    """Sustracción espectral clásica: |X| = max(|Y| - alpha*|D|, beta*|Y|)."""
     S = stft(noisy)
     mag, phase = magnitude_and_phase(S)
     noise_mag = estimate_noise_magnitude(mag)
@@ -16,14 +17,15 @@ def spectral_subtraction(noisy: np.ndarray, over_subtraction: float = 1.5,
     S_clean = to_complex(clean_mag, phase)
     return istft(S_clean, length=len(noisy)).astype(np.float32)
 
-def _smooth2d(m: np.ndarray, k: int = 3) -> np.ndarray:
-    ker = np.ones(k) / k
-    m = np.apply_along_axis(lambda r: np.convolve(r, ker, mode="same"), 1, m)
-    m = np.apply_along_axis(lambda r: np.convolve(r, ker, mode="same"), 0, m)
-    return m
-
 def spectral_gating(noisy: np.ndarray, n_std: float = 1.5,
                     gain_floor: float = 0.05, smooth: bool = True) -> np.ndarray:
+    """Compuerta espectral (spectral gating): baseline clásico basado en máscara.
+
+    Estima un perfil de ruido por banda (media y desviación de los fotogramas más
+    silenciosos), fija un umbral T(k) = mu + n_std*sigma, y construye una máscara:
+    deja pasar los puntos por encima del umbral (voz) y atenúa los de abajo (ruido)
+    hasta una ganancia mínima gain_floor. Opcionalmente suaviza la máscara.
+    """
     S = stft(noisy)
     mag, phase = magnitude_phase(S)
 
@@ -42,7 +44,15 @@ def spectral_gating(noisy: np.ndarray, n_std: float = 1.5,
     S_clean = to_complex(mag * mask, phase)
     return istft(S_clean, length=len(noisy)).astype(np.float32)
 
+def _smooth2d(m: np.ndarray, k: int = 3) -> np.ndarray:
+    """Suavizado separable (media móvil) en frecuencia y tiempo, solo con numpy."""
+    ker = np.ones(k) / k
+    m = np.apply_along_axis(lambda r: np.convolve(r, ker, mode="same"), 1, m)
+    m = np.apply_along_axis(lambda r: np.convolve(r, ker, mode="same"), 0, m)
+    return m
+
 def estimate_noise_magnitude(mag: np.ndarray, quantile: float = 0.10) -> np.ndarray:
+    """Estima la magnitud del ruido por banda tomando un percentil bajo en el tiempo."""
     return np.quantile(mag, quantile, axis=1, keepdims=True)
 
 def magnitude_and_phase(S: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -64,11 +74,15 @@ if __name__ == "__main__":
 
     root = Path(__file__).resolve().parents[1] / "data" / "raw" / "voicebank"
     clean_wavs = sorted((root / "clean_testset").glob("*.wav")) if (root / "clean_testset").exists() else []
+    if not clean_wavs:
+        raise SystemExit(f"Coloca WAV reales en {root} para ejecutar la prueba.")
     name0 = clean_wavs[0].name
     clean = load_audio(root / "clean_testset" / name0)
     noisy = load_audio(root / "noisy_testset" / name0)
     clean, noisy = match_length(clean, noisy)
     print(f"Archivo: {name0}")
-    est = spectral_subtraction(noisy)[:len(clean)]
-    res_noise = np.sqrt(np.mean((clean - est) ** 2))
-    print(f"RMS(residuo vs limpio) = {res_noise:.4f}")
+    for name, fn in [("spectral gating", spectral_gating),
+                     ("sustraccion espectral", spectral_subtraction)]:
+        est = fn(noisy)[:len(clean)]
+        res_noise = np.sqrt(np.mean((clean - est) ** 2))
+        print(f"{name}: RMS(resultado vs limpio) = {res_noise:.4f}")
